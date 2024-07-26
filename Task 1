@@ -1,0 +1,69 @@
+1. Load NYC Taxi Data to DataLake/Blob Storage/Databricks
+# Reading data from storage into a DataFrame
+df = spark.read.format("csv").option("header", "true").load("/mnt/data/nyc_taxi_data.csv")
+df.show(5)
+Add "Revenue" Column to DataFrame
+from pyspark.sql.functions import col, sum
+
+# Adding the "Revenue" column
+df = df.withColumn("Revenue", 
+                   col("Fare_amount") + 
+                   col("Extra") + 
+                   col("MTA_tax") + 
+                   col("Improvement_surcharge") + 
+                   col("Tip_amount") + 
+                   col("Tolls_amount") + 
+                   col("Total_amount"))
+df.show(5)
+Increase Count of Total Passengers by Area
+# Group by pickup location and calculate total passengers
+df_passengers_by_area = df.groupBy("pickup_location").agg(sum("passenger_count").alias("total_passengers"))
+df_passengers_by_area.show()
+Realtime Average Fare/Total Earning Amount Earned by 2 Vendors
+Assuming "vendor_id" identifies the vendors:
+# Group by vendor and calculate average fare and total earnings
+df_avg_fare_total_earnings = df.groupBy("vendor_id").agg(
+    avg("Fare_amount").alias("avg_fare"), 
+    sum("Revenue").alias("total_earnings")
+).filter(col("vendor_id").isin(['1', '2']))
+df_avg_fare_total_earnings.show()
+Moving Count of Payments Made by Each Payment Mode
+# Group by payment type and calculate count
+df_payment_mode_count = df.groupBy("payment_type").count()
+df_payment_mode_count.show()
+6. Highest Two Gaining Vendors on a Particular Date
+from pyspark.sql.functions import desc
+
+# Filter by a specific date
+specific_date = "2024-07-25"  # example date
+df_filtered_date = df.filter(df.date == specific_date)
+
+# Group by vendor and calculate total revenue, passenger count, and total distance
+df_highest_gaining_vendors = df_filtered_date.groupBy("vendor_id").agg(
+    sum("Revenue").alias("total_revenue"),
+    sum("passenger_count").alias("total_passengers"),
+    sum("trip_distance").alias("total_distance")
+).orderBy(desc("total_revenue")).limit(2)
+
+df_highest_gaining_vendors.show()
+7. Most Number of Passengers Between Two Locations
+# Group by route (pickup and dropoff locations) and calculate total passengers
+df_passengers_by_route = df.groupBy("pickup_location", "dropoff_location").agg(
+    sum("passenger_count").alias("total_passengers")
+).orderBy(desc("total_passengers")).limit(1)
+df_passengers_by_route.show()
+8. Top Pickup Locations with Most Passengers in Last 5/10 Seconds
+from pyspark.sql.functions import window
+
+# Assuming a column "timestamp" with the format yyyy-MM-dd HH:mm:ss
+df_with_timestamp = df.withColumn("timestamp", col("timestamp").cast("timestamp"))
+
+# Group by 5-second window and pickup location, then calculate total passengers
+df_top_pickup_locations = df_with_timestamp.groupBy(
+    window(col("timestamp"), "5 seconds"), 
+    col("pickup_location")
+).agg(
+    sum("passenger_count").alias("total_passengers")
+).orderBy(desc("total_passengers")).limit(10)
+df_top_pickup_locations.show()
+
