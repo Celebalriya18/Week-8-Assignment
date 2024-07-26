@@ -1,0 +1,100 @@
+Load Dataset into DBFS
+Assuming you have a JSON dataset, you can upload it to DBFS using Databricks UI or Databricks CLI. Here, I'll outline how to use the Databricks UI:
+
+Upload the Dataset:
+
+Go to the Databricks workspace.
+Navigate to the "Data" tab.
+Click "Add Data" and select "Upload File".
+Choose your JSON file and upload it.
+
+Access the Dataset in Databricks Notebook:
+
+# Assuming the file is uploaded to '/FileStore/tables/your_json_file.json'
+file_path = "/FileStore/tables/your_json_file.json"
+
+# Load the JSON file into a DataFrame
+df = spark.read.json(file_path)
+df.show(5)
+Step 2: Flatten JSON Fields
+from pyspark.sql.functions import col, explode
+from pyspark.sql.types import StructType, StructField, StringType, ArrayType
+
+def flatten(df):
+    # Go through each field in the schema and recursively flatten the nested structures
+    flat_cols = []
+    complex_fields = []
+    
+    for field in df.schema.fields:
+        dtype = field.dataType
+        field_name = field.name
+        
+        if isinstance(dtype, StructType):
+            # If the field is a struct, flatten it
+            for nested_field in dtype.fields:
+                flat_cols.append(col(f"{field_name}.{nested_field.name}").alias(f"{field_name}_{nested_field.name}"))
+        elif isinstance(dtype, ArrayType):
+            # If the field is an array of structs, explode and flatten
+            complex_fields.append(field_name)
+        else:
+            flat_cols.append(col(field_name))
+    
+    df = df.select(flat_cols + [col for col in complex_fields])
+    
+    for field_name in complex_fields:
+        df = df.withColumn(field_name, explode(col(field_name)))
+        df = flatten(df)
+    
+    return df
+
+# Flatten the DataFrame
+df_flattened = flatten(df)
+df_flattened.show(5)
+Step 3: Write Flattened File as External Parquet Table
+external_location = "/mnt/external/flattened_parquet_table"
+# Step 1: Load Dataset into DBFS
+file_path = "/FileStore/tables/your_json_file.json"
+df = spark.read.json(file_path)
+df.show(5)
+
+# Step 2: Flatten JSON Fields
+from pyspark.sql.functions import col, explode
+from pyspark.sql.types import StructType, StructField, StringType, ArrayType
+
+def flatten(df):
+    flat_cols = []
+    complex_fields = []
+    
+    for field in df.schema.fields:
+        dtype = field.dataType
+        field_name = field.name
+        
+        if isinstance(dtype, StructType):
+            for nested_field in dtype.fields:
+                flat_cols.append(col(f"{field_name}.{nested_field.name}").alias(f"{field_name}_{nested_field.name}"))
+        elif isinstance(dtype, ArrayType):
+            complex_fields.append(field_name)
+        else:
+            flat_cols.append(col(field_name))
+    
+    df = df.select(flat_cols + [col for col in complex_fields])
+    
+    for field_name in complex_fields:
+        df = df.withColumn(field_name, explode(col(field_name)))
+        df = flatten(df)
+    
+    return df
+
+df_flattened = flatten(df)
+df_flattened.show(5)
+
+# Step 3: Write Flattened File as External Parquet Table
+external_location = "/mnt/external/flattened_parquet_table"
+df_flattened.write.mode("overwrite").parquet(external_location)
+
+# Create an external table using the location where the Parquet files are stored
+spark.sql("""
+CREATE TABLE IF NOT EXISTS flattened_parquet_table
+USING PARQUET
+LOCATION '/mnt/external/flattened_parquet_table'
+""")
